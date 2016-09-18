@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lightningnetwork/lnd/lndcc"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg"
@@ -367,6 +368,12 @@ func (b *BtcWallet) ListUnspentWitness(minConfs int32) ([]*lnwallet.Utxo, error)
 					Index: output.Vout,
 				},
 			}
+			colorData, err := lndcc.GetTxoData(utxo.OutPoint)
+			if err != nil {
+				return nil, err
+			}
+			utxo.ColorData = colorData
+
 			witnessOutputs = append(witnessOutputs, utxo)
 		}
 

@@ -4,12 +4,14 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/chainntnfs"
 	"github.com/lightningnetwork/lnd/channeldb"
+	"github.com/lightningnetwork/lnd/lndcc"
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcutil/hdkeychain"
 
@@ -37,7 +39,8 @@ const (
 	// rotations, etc.
 	identityKeyIndex = hdkeychain.HardenedKeyStart + 2
 
-	commitFee = 5000
+	// @CC: disable fees for PoC simplification
+	commitFee = 0
 )
 
 var (
@@ -45,6 +48,10 @@ var (
 	lightningNamespaceKey = []byte("ln-wallet")
 	waddrmgrNamespaceKey  = []byte("waddrmgr")
 	wtxmgrNamespaceKey    = []byte("wtxmgr")
+
+	// @CC: for now, each lnd instance is configured to operate on one specific asset type
+	// @TODO configured per-channel
+	globallyActiveAssetId = os.Getenv("CC_ASSET_ID")
 )
 
 // ErrInsufficientFunds is a type matching the error interface which is
@@ -702,7 +709,14 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 	// ordering, by sorting we no longer need to send the entire
 	// transaction. Only signatures will be exchanged.
 	fundingTx.AddTxOut(multiSigOut)
-	txsort.InPlaceSort(pendingReservation.fundingTx)
+	txsort.InPlaceSort(fundingTx)
+
+	fundingTx, err = lndcc.ColorifyTx(fundingTx, true)
+	if err != nil {
+		req.err <- err
+		return
+	}
+	pendingReservation.fundingTx = fundingTx
 
 	// Next, sign all inputs that are ours, collecting the signatures in
 	// order of the inputs.
@@ -819,6 +833,17 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 	// instead we'll just send signatures.
 	txsort.InPlaceSort(ourCommitTx)
 	txsort.InPlaceSort(theirCommitTx)
+
+	ourCommitTx, err = lndcc.ColorifyTx(ourCommitTx, false)
+	if err != nil {
+		req.err <- err
+		return
+	}
+	theirCommitTx, err = lndcc.ColorifyTx(theirCommitTx, false)
+	if err != nil {
+		req.err <- err
+		return
+	}
 
 	deliveryScript, err := txscript.PayToAddrScript(theirContribution.DeliveryAddress)
 	if err != nil {
@@ -1127,8 +1152,19 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 	// ordering. This ensures that both parties sign the same sighash
 	// without further synchronization.
 	txsort.InPlaceSort(ourCommitTx)
+	ourCommitTx, err = lndcc.ColorifyTx(ourCommitTx, false)
+	if err != nil {
+		req.err <- err
+		return
+	}
 	pendingReservation.partialState.OurCommitTx = ourCommitTx
+
 	txsort.InPlaceSort(theirCommitTx)
+	theirCommitTx, err = lndcc.ColorifyTx(theirCommitTx, false)
+	if err != nil {
+		req.err <- err
+		return
+	}
 
 	witnessScript := pendingReservation.partialState.FundingWitnessScript
 	channelValue := int64(pendingReservation.partialState.Capacity)
@@ -1222,7 +1258,7 @@ func (l *LightningWallet) selectCoinsAndChange(feeRate uint64, amt btcutil.Amoun
 	// Perform coin selection over our available, unlocked unspent outputs
 	// in order to find enough coins to meet the funding amount
 	// requirements.
-	selectedCoins, changeAmt, err := coinSelect(feeRate, amt, coins)
+	selectedCoins, changeAmt, err := coinSelect(feeRate, amt, coins, globallyActiveAssetId)
 	if err != nil {
 		return err
 	}
@@ -1313,7 +1349,7 @@ func initStateHints(commit1, commit2 *wire.MsgTx,
 // funds, a non-nil error is returned. Additionally, the total amount of the
 // selected coins are returned in order for the caller to properly handle
 // change+fees.
-func selectInputs(amt btcutil.Amount, coins []*Utxo) (btcutil.Amount, []*wire.OutPoint, error) {
+func selectInputs(amt btcutil.Amount, coins []*Utxo, assetId string) (btcutil.Amount, []*wire.OutPoint, error) {
 	var (
 		selectedUtxos []*wire.OutPoint
 		satSelected   btcutil.Amount
@@ -1335,8 +1371,12 @@ func selectInputs(amt btcutil.Amount, coins []*Utxo) (btcutil.Amount, []*wire.Ou
 			Index: coin.Index,
 		}
 
-		selectedUtxos = append(selectedUtxos, utxo)
-		satSelected += coin.Value
+		// @CC: filter for coins of color `assetId` only
+		if coin.ColorData.AssetId == assetId {
+			selectedUtxos = append(selectedUtxos, utxo)
+			// @CC: use colored asset value
+			satSelected += coin.ColorData.Value
+		}
 
 		i++
 	}
@@ -1349,9 +1389,20 @@ func selectInputs(amt btcutil.Amount, coins []*Utxo) (btcutil.Amount, []*wire.Ou
 // specified fee rate should be expressed in sat/byte for coin selection to
 // function properly.
 func coinSelect(feeRate uint64, amt btcutil.Amount,
-	coins []*Utxo) ([]*wire.OutPoint, btcutil.Amount, error) {
+	coins []*Utxo, assetId string) ([]*wire.OutPoint, btcutil.Amount, error) {
 
-	const (
+	// @CC: use (the now color-aware) selectInputs() to pick outputs, completely disregard fee handling for PoC simplification
+	totalTokens, selectedUtxos, err := selectInputs(amt, coins, assetId)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	changeAmt := totalTokens - amt
+	return selectedUtxos, changeAmt, nil
+
+	// dead code ahead
+
+	/*const (
 		// txOverhead is the overhead of a transaction residing within
 		// the version number and lock time.
 		txOverhead = 8
@@ -1408,5 +1459,5 @@ func coinSelect(feeRate uint64, amt btcutil.Amount,
 		changeAmt := overShootAmt - requiredFee
 
 		return selectedUtxos, changeAmt, nil
-	}
+	}*/
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/lightningnetwork/lnd/lndcc"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
@@ -35,7 +36,8 @@ const (
 // Utxo is an unspent output denoted by its outpoint, and output value of the
 // original output.
 type Utxo struct {
-	Value btcutil.Amount
+	Value     btcutil.Amount
+	ColorData *lndcc.TxoData
 	wire.OutPoint
 }
 
