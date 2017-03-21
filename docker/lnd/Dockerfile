@@ -1,4 +1,4 @@
-FROM golang:1.7
+FROM golang:1.8
 
 MAINTAINER Olaoluwa Osuntokun <laolu@lightning.network>
 
@@ -13,7 +13,7 @@ ENV GODEBUG netdns=cgo
 RUN go get -u github.com/Masterminds/glide
 
 # Grab and install the latest version of lnd and all related dependencies.
-RUN git clone https://github.com/lightningnetwork/lnd $GOPATH/src/github.com/lightningnetwork/lnd
+RUN git clone https://github.com/MyceliumGear/lnd-cc $GOPATH/src/github.com/lightningnetwork/lnd
 
 # Make lnd folder default.
 WORKDIR $GOPATH/src/github.com/lightningnetwork/lnd
@@ -24,3 +24,5 @@ RUN go install . ./cmd/...
 
 COPY "docker/lnd/start-lnd.sh" .
 RUN chmod +x start-lnd.sh
+
+VOLUME ["/rpc"]

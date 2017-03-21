@@ -41,7 +41,7 @@ func (d TxoData) String() string {
 // @FIXME currently assumes a single-input tx
 func ColorifyTx(tx *wire.MsgTx, isFunding bool) (*wire.MsgTx, error) {
 
-	newTx := wire.NewMsgTx()
+	newTx := wire.NewMsgTx(wire.TxVersion)
 	newTx.Version = tx.Version
 
 	for _, txIn := range tx.TxIn {

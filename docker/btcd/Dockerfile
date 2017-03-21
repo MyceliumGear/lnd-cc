@@ -1,4 +1,4 @@
-FROM golang:1.7
+FROM golang:1.8
 
 MAINTAINER Olaoluwa Osuntokun <laolu@lightning.network>
 
@@ -31,7 +31,7 @@ RUN "/go/bin/gencerts" --host="*" --directory="/rpc" --force
 # You should NOT do this before certificate generation!
 # Otherwise manually generated certificate will be overriden with shared
 # mounted volume! For more info read dockerfile "VOLUME" documentation.
-VOLUME ["/rpc"]
+VOLUME ["/rpc", "/data"]
 
 COPY "start-btcctl.sh" .
 COPY "start-btcd.sh" .
